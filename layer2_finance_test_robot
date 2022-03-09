@@ -1,0 +1,184 @@
+#!/usr/bin/python
+# _*_ coding: utf-8 _*_
+import requests
+import json
+import csv
+import datetime
+import time
+import sys
+
+from web3 import Web3, HTTPProvider
+from eth_account.messages import encode_defunct
+from json import JSONDecodeError
+
+# 替换自己的infra ropsten token
+w3 = Web3(Web3.HTTPProvider("https://ropsten.infura.io/v3/$token"))
+
+
+# api-endpoint
+ASSETS_URL = "https://api-mainnet.layer2.finance/assets?user=$address"
+STRATEGIES_URL = "https://api-mainnet.layer2.finance/assets/$asset_id/strategies?user=$address"
+# LEADER_BOARD_URL = "https://layer2.finance/leaderboard"
+STRATEGIES_OPERATION_URL = "https://api-mainnet.layer2.finance/strategyOperation"
+GLOBAL_INFO_URL = "https://api-mainnet.layer2.finance/globalInfo"
+
+ctime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def balance_to_readable(balanceStr):
+    return float(balanceStr) / 10**18
+
+def get_current_timestamp():
+    return int(time.time()*1000)
+
+'''
+1.计算收益率最大的协议
+2.计算需要赎回资金的协议
+3.从协议赎回资金
+4.充值到收益率最大协议中
+'''
+def list_strategies(asset_id,balance,address,private_key,asset_name,show_balance_only):
+
+    PARAMS = {} 
+    # sending get request and saving the response as response json object
+    r = requests.get(url=STRATEGIES_URL.replace("$asset_id",str(asset_id)).replace("$address",address), params=PARAMS)
+    data = r.json()
+    strategies = data['strategies']
+    
+    max_apy_strategy = None
+    max_apy = 0.0 
+    for i in range(0, len(strategies)):
+        strategy_apy = float(strategies[i]['apy'])
+        if strategy_apy > max_apy:
+            max_apy = strategy_apy
+            max_apy_strategy = strategies[i]
+                
+    if max_apy_strategy == None:
+        print("=======get max_apy_strategy error=======")
+        return
+    print(max_apy_strategy)
+    max_apy_strategy_id = int(max_apy_strategy['id'])
+    max_apy_strategy_name = str(max_apy_strategy['name'])
+
+    l2_withdraw_success = False
+    l2_deposite_success = False
+    for i in range(0, len(strategies)):
+        if  strategies[i]['available'] == True:
+            st_token_balance = balance_to_readable(strategies[i]['stTokenAmt'])
+            strategy_apy = float(strategies[i]['apy'])
+            
+            # L2协议有资产且存在更高收益协议，则从该协议提现，充值到利率最高的协议
+            if st_token_balance > 0.0 and (strategy_apy+5) < max_apy and not l2_withdraw_success and not show_balance_only:
+                l2_withdraw(int(strategies[i]['stTokenAmt']),int(strategies[i]['id']),private_key)
+                l2_withdraw_success = True
+                print("%s find best apy strategy execute l2_withdraw address:%s asset_name:%s strategy_name:%s amount:%s" % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),address,asset_name,str(strategies[i]['name']),str(balance_to_readable(strategies[i]['stTokenAmt']))))
+                time.sleep(10)
+                l2_deposite(balance,max_apy_strategy_id,private_key)
+                l2_deposite_success = True
+                print("%s find best apy strategy execute l2_deposite address:%s asset_name:%s strategy_name:%s amount:%s" % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),address,asset_name,str(max_apy_strategy_name),str(balance_to_readable(balance))))
+            # L2有余额,执行L2充值L1
+            if balance > 0.5 *10**18 and not l2_deposite_success and not show_balance_only:
+                l2_deposite(balance,max_apy_strategy_id,private_key)
+                l2_deposite_success = True
+                print("%s when balance avaliable execute l2_deposite address:%s asset_name:%s strategy_name:%s amount:%s" % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),address,asset_name,str(max_apy_strategy_name),str(balance_to_readable(balance))))
+            if st_token_balance > 0.0:
+                print("%s find st_token_balance address:%s asset_name:%s strategy_name:%s strategy_apy:%s amount:%s" % (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),address,asset_name,str(strategies[i]['name']),str(strategies[i]['apy']),str(balance_to_readable(strategies[i]['stTokenAmt']))))
+
+
+def list_assets(address):
+    PARAMS = {}
+    # sending get request and saving the response as response object
+    r = requests.get(url=ASSETS_URL.replace("$address",str(address)), params=PARAMS)
+    data = r.json()
+    return data['assets']
+
+
+def solidityKeccak256(timestamp=None,amount=None,strategy_id=None,type=None,private_key=None):
+    data = Web3.solidityKeccak(["uint8", "uint32", "uint256", "uint64"], [type, strategy_id, amount,  timestamp])
+    signable_message = encode_defunct(data)
+    signature = w3.eth.account.sign_message(signable_message, private_key).signature.hex()
+    return signature
+
+
+'''
+Layer2 操作
+1、通过 keccak256 处理(type  + strategyId + amount + 当前时间)
+2、签名
+'''
+def strategy_operation(type,amount,strategy_id,private_key):
+    timestamp = get_current_timestamp()
+    signature = solidityKeccak256(timestamp,amount,strategy_id,type,private_key)
+    PARAMS = {
+        "type":type,
+        "strategyId":str(strategy_id),
+        "amount":str(amount),
+        "timestamp":timestamp,
+        "signature":signature
+    }
+    # sending get request and saving the response as response json object
+    r = requests.post(url=STRATEGIES_OPERATION_URL, json=PARAMS)
+    data = r.json()
+    print("strategy_operation result:"+str(data))
+
+def l2_withdraw(amount,strategy_id,private_key):
+    strategy_operation(4,amount,strategy_id,private_key)
+
+def l2_deposite(amount,strategy_id,private_key):
+    strategy_operation(3,amount,strategy_id,private_key)
+
+def get_next_reallocation_time():
+    PARAMS = {}
+    # sending get request and saving the response as response object
+    r = requests.get(url=GLOBAL_INFO_URL, params=PARAMS)
+    data = r.json()
+    return int(data['nextReallocationTime'])
+
+
+def yield_hunter_run(address,private_key,show_balance_only=False):
+    # print("=======layer2.finance yield hunter run address:%s=======" %(address))
+    assets = list_assets(address)
+    for i in range(0,len(assets)):
+        if assets[i]['amount'] == '':
+            continue
+        list_strategies(i+1,int(str(assets[i]['amount'])),address,private_key,assets[i]['name'],show_balance_only)  
+
+'''
+执行hunter
+获取下一班车时间
+    如果到时间了，则执行下一次yield_hunter_run；
+    否则 继续等待
+'''
+def run():
+    condition = True
+    next_reallocation_time = 0
+    current_timestamp = 0
+    while True:
+        if condition:
+            # print("now:"+datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')+"\n")
+
+            # print(":::::::DAI:::::::")
+            address = "0x"+"bbBF5cAB4176CE9f2F9b6c748467f693C3d78D52"
+            private_key = ""
+
+            yield_hunter_run(address,private_key)
+            
+            next_reallocation_time = get_next_reallocation_time()
+            print("next_reallocation_time:"+ datetime.datetime.fromtimestamp(next_reallocation_time/1000).strftime('%Y-%m-%d %H:%M:%S'))
+            condition = False
+        current_timestamp = get_current_timestamp()
+        # print("current_timestamp_time:"+ datetime.datetime.fromtimestamp(current_timestamp/1000).strftime('%Y-%m-%d %H:%M:%S'))
+        condition = (current_timestamp + 1000) > next_reallocation_time
+        time.sleep(1)
+def exec():
+    try:
+        run()
+    except JSONDecodeError:
+        ten_minutes = 10 * 60
+        print("layer2.finance done,sleep "+ str(ten_minutes) +"s")
+        time.sleep(ten_minutes)
+        exec()
+
+def main():
+    exec()
+
+if __name__ == '__main__':
+    main()
