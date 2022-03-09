@@ -11,7 +11,7 @@ from web3 import Web3, HTTPProvider
 from json import JSONDecodeError
 
 # 注意替换自己的infra goerli 测试网 token
-web3 = Web3(Web3.HTTPProvider("https://goerli.infura.io/v3/${token}"))
+web3 = Web3(Web3.HTTPProvider("https://goerli.infura.io/v3/$token"))
 
 # api-endpoint
 MARK_LIQUIDITY_URL = "https://cbridge-v2-test.celer.network/v1/markLiquidity"
