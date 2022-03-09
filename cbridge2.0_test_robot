@@ -1,0 +1,448 @@
+# _*_ coding: utf-8 _*_
+import requests
+import json
+import csv
+import datetime
+import time
+import sys
+import random
+
+from web3 import Web3, HTTPProvider
+from json import JSONDecodeError
+
+# 注意替换自己的infra goerli 测试网 token
+web3 = Web3(Web3.HTTPProvider("https://goerli.infura.io/v3/${token}"))
+
+# api-endpoint
+MARK_LIQUIDITY_URL = "https://cbridge-v2-test.celer.network/v1/markLiquidity"
+UNLOCK_CLAIM = "https://cbridge-v2-test.celer.network/v1/unlockFarmingReward"
+
+FIRST_GET_TRANSFER_HISTORY_URL = "https://cbridge-v2-test.celer.network/v1/transferHistory?addr=$address&page_size=$page_size"
+GET_TRANSFER_HISTORY_URL = "https://cbridge-v2-test.celer.network/v1/transferHistory?addr=$address&page_size=$page_size&next_page_token=$next_page_token"
+FIRST_GET_LP_HISTORY_URL = "https://cbridge-v2-test.celer.network/v1/lpHistory?addr=$address&page_size=$page_size"
+GET_LP_HISTORY_URL = "https://cbridge-v2-test.celer.network/v1/lpHistory?addr=$address&page_size=$page_size&next_page_token=$next_page_token"
+
+ctime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+# Goerli Testnet Cbridge 合约地址及ABI
+contract_address = Web3.toChecksumAddress('0xD16b5129293D767E24570EfD920FE5593772748f')
+contract_abi = '[{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"period","type":"uint256"}],"name":"DelayPeriodUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"threshold","type":"uint256"}],"name":"DelayThresholdUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"bytes32","name":"id","type":"bytes32"}],"name":"DelayedTransferAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"bytes32","name":"id","type":"bytes32"},{"indexed":false,"internalType":"address","name":"receiver","type":"address"},{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"DelayedTransferExecuted","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"length","type":"uint256"}],"name":"EpochLengthUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"cap","type":"uint256"}],"name":"EpochVolumeUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"GovernorAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"GovernorRemoved","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint64","name":"seqnum","type":"uint64"},{"indexed":false,"internalType":"address","name":"provider","type":"address"},{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"LiquidityAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"MaxSendUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"MinAddUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"MinSendUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"Paused","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"PauserAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"PauserRemoved","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"bytes32","name":"transferId","type":"bytes32"},{"indexed":false,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"address","name":"receiver","type":"address"},{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint64","name":"srcChainId","type":"uint64"},{"indexed":false,"internalType":"bytes32","name":"srcTransferId","type":"bytes32"}],"name":"Relay","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"resetTime","type":"uint256"}],"name":"ResetNotification","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"bytes32","name":"transferId","type":"bytes32"},{"indexed":false,"internalType":"address","name":"sender","type":"address"},{"indexed":false,"internalType":"address","name":"receiver","type":"address"},{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"uint64","name":"dstChainId","type":"uint64"},{"indexed":false,"internalType":"uint64","name":"nonce","type":"uint64"},{"indexed":false,"internalType":"uint32","name":"maxSlippage","type":"uint32"}],"name":"Send","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address[]","name":"_signers","type":"address[]"},{"indexed":false,"internalType":"uint256[]","name":"_powers","type":"uint256[]"}],"name":"SignersUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"Unpaused","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"bytes32","name":"withdrawId","type":"bytes32"},{"indexed":false,"internalType":"uint64","name":"seqnum","type":"uint64"},{"indexed":false,"internalType":"address","name":"receiver","type":"address"},{"indexed":false,"internalType":"address","name":"token","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":false,"internalType":"bytes32","name":"refid","type":"bytes32"}],"name":"WithdrawDone","type":"event"},{"inputs":[{"internalType":"address","name":"_account","type":"address"}],"name":"addGovener","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_token","type":"address"},{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"addLiquidity","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"addPauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"addseq","outputs":[{"internalType":"uint64","name":"","type":"uint64"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"delayPeriod","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"delayThresholds","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"delayedTransfers","outputs":[{"internalType":"address","name":"receiver","type":"address"},{"internalType":"address","name":"token","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"epochLength","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"epochVolumeCaps","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"epochVolumes","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes32","name":"id","type":"bytes32"}],"name":"executeDelayedTransfer","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"governors","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"period","type":"uint256"}],"name":"increaseNoticePeriod","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_account","type":"address"}],"name":"isGovernor","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"isPauser","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"lastOpTimestamps","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"maxSend","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"minAdd","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"minSend","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"minimalMaxSlippage","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"nativeWrap","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"noticePeriod","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"notifyResetSigners","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"paused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"pausers","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes","name":"_relayRequest","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"},{"internalType":"address[]","name":"_signers","type":"address[]"},{"internalType":"uint256[]","name":"_powers","type":"uint256[]"}],"name":"relay","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_account","type":"address"}],"name":"removeGovener","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"removePauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renounceGovener","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renouncePauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_signers","type":"address[]"},{"internalType":"uint256[]","name":"_powers","type":"uint256[]"}],"name":"resetSigners","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"resetTime","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_receiver","type":"address"},{"internalType":"address","name":"_token","type":"address"},{"internalType":"uint256","name":"_amount","type":"uint256"},{"internalType":"uint64","name":"_dstChainId","type":"uint64"},{"internalType":"uint64","name":"_nonce","type":"uint64"},{"internalType":"uint32","name":"_maxSlippage","type":"uint32"}],"name":"send","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_period","type":"uint256"}],"name":"setDelayPeriod","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_tokens","type":"address[]"},{"internalType":"uint256[]","name":"_thresholds","type":"uint256[]"}],"name":"setDelayThresholds","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_length","type":"uint256"}],"name":"setEpochLength","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_tokens","type":"address[]"},{"internalType":"uint256[]","name":"_caps","type":"uint256[]"}],"name":"setEpochVolumeCaps","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_tokens","type":"address[]"},{"internalType":"uint256[]","name":"_amounts","type":"uint256[]"}],"name":"setMaxSend","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_tokens","type":"address[]"},{"internalType":"uint256[]","name":"_amounts","type":"uint256[]"}],"name":"setMinAdd","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_tokens","type":"address[]"},{"internalType":"uint256[]","name":"_amounts","type":"uint256[]"}],"name":"setMinSend","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"_minimalMaxSlippage","type":"uint32"}],"name":"setMinimalMaxSlippage","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_weth","type":"address"}],"name":"setWrap","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"ssHash","outputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"transfers","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"unpause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address[]","name":"_newSigners","type":"address[]"},{"internalType":"uint256[]","name":"_newPowers","type":"uint256[]"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"},{"internalType":"address[]","name":"_curSigners","type":"address[]"},{"internalType":"uint256[]","name":"_curPowers","type":"uint256[]"}],"name":"updateSigners","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes","name":"_msg","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"},{"internalType":"address[]","name":"_signers","type":"address[]"},{"internalType":"uint256[]","name":"_powers","type":"uint256[]"}],"name":"verifySigs","outputs":[],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes","name":"_wdmsg","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"},{"internalType":"address[]","name":"_signers","type":"address[]"},{"internalType":"uint256[]","name":"_powers","type":"uint256[]"}],"name":"withdraw","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"withdraws","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"stateMutability":"payable","type":"receive"}]'
+
+# Goerli Testnet USDT、CELR Faucets 合约地址及ABI
+faucets_contract_adress = Web3.toChecksumAddress('0x50B96c4374EFeEA0C183D06679A14e951E33B4Dd')
+faucets_contract_abi = '[{"inputs":[{"internalType":"address[]","name":"tokens","type":"address[]"}],"name":"drip","outputs":[],"stateMutability":"nonpayable","type":"function"}]'
+
+# Goerli Testnet sgn-delegete
+delegate_constract_address = Web3.toChecksumAddress('0x89B7ACFe5ECe683229DcDcD35053Cf7Ee41077b0')
+delegate_constract_abi = '[{"inputs":[{"internalType":"address","name":"_celerTokenAddress","type":"address"},{"internalType":"uint256","name":"_proposalDeposit","type":"uint256"},{"internalType":"uint256","name":"_votingPeriod","type":"uint256"},{"internalType":"uint256","name":"_unbondingPeriod","type":"uint256"},{"internalType":"uint256","name":"_maxBondedValidators","type":"uint256"},{"internalType":"uint256","name":"_minValidatorTokens","type":"uint256"},{"internalType":"uint256","name":"_minSelfDelegation","type":"uint256"},{"internalType":"uint256","name":"_advanceNoticePeriod","type":"uint256"},{"internalType":"uint256","name":"_validatorBondInterval","type":"uint256"},{"internalType":"uint256","name":"_maxSlashFactor","type":"uint256"}],"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"valAddr","type":"address"},{"indexed":true,"internalType":"address","name":"delAddr","type":"address"},{"indexed":false,"internalType":"uint256","name":"valTokens","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"delShares","type":"uint256"},{"indexed":false,"internalType":"int256","name":"tokenDiff","type":"int256"}],"name":"DelegationUpdate","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"Paused","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"PauserAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"PauserRemoved","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"valAddr","type":"address"},{"indexed":false,"internalType":"uint64","name":"nonce","type":"uint64"},{"indexed":false,"internalType":"uint256","name":"slashAmt","type":"uint256"}],"name":"Slash","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"recipient","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"SlashAmtCollected","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"valAddr","type":"address"},{"indexed":true,"internalType":"address","name":"delAddr","type":"address"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"Undelegated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"Unpaused","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"valAddr","type":"address"},{"indexed":false,"internalType":"string","name":"key","type":"string"},{"indexed":false,"internalType":"bytes","name":"data","type":"bytes"},{"indexed":false,"internalType":"address","name":"from","type":"address"}],"name":"ValidatorNotice","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"valAddr","type":"address"},{"indexed":true,"internalType":"enum DataTypes.ValidatorStatus","name":"status","type":"uint8"}],"name":"ValidatorStatusUpdate","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"WhitelistedAdded","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"address","name":"account","type":"address"}],"name":"WhitelistedRemoved","type":"event"},{"inputs":[],"name":"CELER_TOKEN","outputs":[{"internalType":"contract IERC20","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"addPauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"addWhitelisted","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"bondValidator","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"bondedTokens","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"bondedValAddrs","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"collectForfeiture","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"}],"name":"completeUndelegate","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"}],"name":"confirmUnbondedValidator","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"uint256","name":"_tokens","type":"uint256"}],"name":"delegate","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"drainToken","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"forfeiture","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getBondedValidatorNum","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getBondedValidatorsTokens","outputs":[{"components":[{"internalType":"address","name":"valAddr","type":"address"},{"internalType":"uint256","name":"tokens","type":"uint256"}],"internalType":"struct DataTypes.ValidatorTokens[]","name":"","type":"tuple[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"address","name":"_delAddr","type":"address"}],"name":"getDelegatorInfo","outputs":[{"components":[{"internalType":"address","name":"valAddr","type":"address"},{"internalType":"uint256","name":"tokens","type":"uint256"},{"internalType":"uint256","name":"shares","type":"uint256"},{"components":[{"internalType":"uint256","name":"shares","type":"uint256"},{"internalType":"uint256","name":"creationBlock","type":"uint256"}],"internalType":"struct DataTypes.Undelegation[]","name":"undelegations","type":"tuple[]"},{"internalType":"uint256","name":"undelegationTokens","type":"uint256"},{"internalType":"uint256","name":"withdrawableUndelegationTokens","type":"uint256"}],"internalType":"struct DataTypes.DelegatorInfo","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"enum DataTypes.ParamName","name":"_name","type":"uint8"}],"name":"getParamValue","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getQuorumTokens","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getValidatorNum","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"}],"name":"getValidatorStatus","outputs":[{"internalType":"enum DataTypes.ValidatorStatus","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"}],"name":"getValidatorTokens","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"govContract","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"bool","name":"_checkSelfDelegation","type":"bool"}],"name":"hasMinRequiredTokens","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_signer","type":"address"},{"internalType":"uint256","name":"_minSelfDelegation","type":"uint256"},{"internalType":"uint64","name":"_commissionRate","type":"uint64"}],"name":"initializeValidator","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_addr","type":"address"}],"name":"isBondedValidator","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"isPauser","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"isWhitelisted","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"nextBondBlock","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"enum DataTypes.ParamName","name":"","type":"uint8"}],"name":"params","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"paused","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"pausers","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"removePauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"removeWhitelisted","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renouncePauser","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"rewardContract","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_addr","type":"address"}],"name":"setGovContract","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_maxSlashFactor","type":"uint256"}],"name":"setMaxSlashFactor","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"enum DataTypes.ParamName","name":"_name","type":"uint8"},{"internalType":"uint256","name":"_value","type":"uint256"}],"name":"setParamValue","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_addr","type":"address"}],"name":"setRewardContract","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bool","name":"_whitelistEnabled","type":"bool"}],"name":"setWhitelistEnabled","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"signerVals","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes","name":"_slashRequest","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"}],"name":"slash","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"slashNonces","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"uint256","name":"_shares","type":"uint256"}],"name":"undelegateShares","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"uint256","name":"_tokens","type":"uint256"}],"name":"undelegateTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"unpause","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint64","name":"_newRate","type":"uint64"}],"name":"updateCommissionRate","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_minSelfDelegation","type":"uint256"}],"name":"updateMinSelfDelegation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_signer","type":"address"}],"name":"updateValidatorSigner","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"valAddrs","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"_valAddr","type":"address"},{"internalType":"string","name":"_key","type":"string"},{"internalType":"bytes","name":"_data","type":"bytes"}],"name":"validatorNotice","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"validators","outputs":[{"internalType":"enum DataTypes.ValidatorStatus","name":"status","type":"uint8"},{"internalType":"address","name":"signer","type":"address"},{"internalType":"uint256","name":"tokens","type":"uint256"},{"internalType":"uint256","name":"shares","type":"uint256"},{"internalType":"uint256","name":"undelegationTokens","type":"uint256"},{"internalType":"uint256","name":"undelegationShares","type":"uint256"},{"internalType":"uint256","name":"minSelfDelegation","type":"uint256"},{"internalType":"uint64","name":"bondBlock","type":"uint64"},{"internalType":"uint64","name":"unbondBlock","type":"uint64"},{"internalType":"uint64","name":"commissionRate","type":"uint64"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes","name":"_msg","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"}],"name":"verifySignatures","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes","name":"_msg","type":"bytes"},{"internalType":"bytes[]","name":"_sigs","type":"bytes[]"},{"internalType":"address[]","name":"","type":"address[]"},{"internalType":"uint256[]","name":"","type":"uint256[]"}],"name":"verifySigs","outputs":[],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"whitelist","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"whitelistEnabled","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"stateMutability":"payable","type":"receive"}]'
+
+def get_now():
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def get_today_0_timestamp():
+    return int(time.mktime(datetime.date.today().timetuple())) * 1000
+
+def get_next_day_0_timestamp():
+    next_date = datetime.date.today() + datetime.timedelta(days=1)
+    return int(time.mktime(next_date.timetuple())) * 1000
+
+def balance_to_readable(balanceStr,decimal):
+    return float(balanceStr) / 10**decimal
+
+def get_current_timestamp():
+    return int(time.time()*1000)    
+
+'''
+获取转账历史
+status 状态
+    3 : Waiting for SGN confirmation  
+    4 : Waiting for fund release
+    5 : Completed
+'''
+def get_transfer_history(address,_next_page_token=None):
+    PARAMS = []
+    page_size = 100
+    if _next_page_token == None:
+        url_address = FIRST_GET_TRANSFER_HISTORY_URL.replace("$address",address).replace("$page_size",str(page_size))
+    else:
+        url_address = GET_TRANSFER_HISTORY_URL.replace("$address",address).replace("$page_size",str(page_size)).replace("$next_page_token",str(_next_page_token))
+    r = requests.get(url=url_address, params=PARAMS)
+    data = r.json()
+    historys = data['history']
+    count = 0
+    for i in range(0, len(historys)):
+        ts = int(historys[i]['ts'])
+        status = historys[i]['status']
+        completed = status == 5 or status == 3 or status == 4
+        if ts >= get_today_0_timestamp() and ts < get_next_day_0_timestamp() and completed:
+            count = count + 1
+    next_page_token =  int(data['next_page_token'])
+    if next_page_token >= get_today_0_timestamp() and next_page_token < get_next_day_0_timestamp():
+        count = count + get_transfer_history(address,next_page_token)
+    # print("address %s transfer suceess : %d" % (address,count))
+    return count
+
+
+'''
+获取lp历史
+status 状态
+    1 : Waiting for SGN confirmation
+    3 : Submitting
+    4 : Completed
+'''
+def get_lp_history(address,_next_page_token=None):
+    PARAMS = []
+    page_size = 100
+    if _next_page_token == None:
+        url_address = FIRST_GET_LP_HISTORY_URL.replace("$address",address).replace("$page_size",str(page_size))
+    else:
+        url_address = GET_LP_HISTORY_URL.replace("$address",address).replace("$page_size",str(page_size)).replace("$next_page_token",str(_next_page_token))
+    r = requests.get(url=url_address, params=PARAMS)
+    data = r.json()
+    historys = data['history']
+    count = 0
+    for i in range(0, len(historys)):
+        ts = int(historys[i]['ts'])
+        status = historys[i]['status']
+        completed = status == 4 or status == 3 or status == 1
+        if ts >= get_today_0_timestamp() and ts < get_next_day_0_timestamp() and completed:
+            count = count + 1
+    next_page_token =  int(data['next_page_token'])
+    if next_page_token >= get_today_0_timestamp() and next_page_token < get_next_day_0_timestamp():
+        count = count + get_lp_history(address,next_page_token)   
+    # print("address %s lp suceess : %d" % (address,count))
+    return count
+
+
+def get_score(address):
+    print("address",address)
+    lp_count = get_lp_history(address)
+    transfer_count = get_transfer_history(address)
+    print("address %s score : %d liquidity:%d transfer:%d " % (address,lp_count + transfer_count,lp_count,transfer_count))
+
+def is_need_add_liquidity(address,threahold):
+    # lp_count = get_lp_history(address)
+    # threahold = random.randint(1000, 1100)
+    global g_add_liquidity_count
+    if g_add_liquidity_count > threahold:
+        print("address %s liquidity_count > %d no need add liquidity " % (address,threahold))
+        return False
+    return True
+
+def is_need_transfer(address,threahold):
+    # transfer_count = get_transfer_history(address)
+    # threahold = random.randint(4900, 5100)
+    global g_transfer_count    
+    if g_transfer_count > threahold:
+        print("address %s transfer_count > %d no need transfer" % (address,threahold))
+        return False
+    return True
+
+def is_need_delegate(address,threahold):
+    global g_delegate_count    
+    if g_delegate_count > threahold:
+        print("address %s delegate_count > %d no need delegate" % (address,threahold))
+        return False
+    return True
+
+
+'''
+获取空投 USDT、CELR
+'''
+def drip(address,private_key):
+    myFaucetsContract = web3.eth.contract(address=faucets_contract_adress, abi=faucets_contract_abi)
+    # gas used by transaction
+    appropriate_gas_amount = 100000
+    #get the nonce.  Prevents one from sending the transaction twice
+    global nonce
+    print("drip nonce:",nonce)
+    #build a transaction in a dictionary
+    # ADDRESS_1 = Web3.toChecksumAddress("0x0000000000000000000000000000000000000020")
+    # ADDRESS_2 = Web3.toChecksumAddress("0000000000000000000000000000000000000002")
+    USDT_ADDRESS = Web3.toChecksumAddress("0xf4b2cbc3ba04c478f0dc824f4806ac39982dce73")
+    CELR_ADDRESS = Web3.toChecksumAddress("0x5d3c0f4ca5ee99f8e8f59ff9a5fab04f6a7e007f")
+    address_s = [USDT_ADDRESS,CELR_ADDRESS]
+    transaction = myFaucetsContract.functions.drip(address_s).buildTransaction({
+        'gas' : appropriate_gas_amount,
+        'nonce' : nonce
+    })
+    
+    signed_tx = web3.eth.account.sign_transaction(transaction, private_key)   
+        
+    #send transaction
+    tx_hash = web3.eth.sendRawTransaction(signed_tx.rawTransaction)
+    
+    #get transaction hash
+    print("https://goerli.etherscan.io/tx/" + web3.toHex(tx_hash))
+    nonce = nonce + 1 
+    
+'''
+sgn delegate 10 celr
+'''
+def delegate_10_celr(address,private_key):
+    if need_delegate == False:
+        return
+    myDelegateContract = web3.eth.contract(address=delegate_constract_address, abi=delegate_constract_abi)
+    # gas used by transaction
+    appropriate_gas_amount = 100000
+    #get the nonce.  Prevents one from sending the transaction twice
+    global nonce
+    print("delegate celr nonce:",nonce)
+    DELEGATOR_ADDRESS = Web3.toChecksumAddress("0xa0000a04b71e45cf383c557b3c9c46e59851b363")  
+    amt = 10000000000000000000  
+    transaction = myDelegateContract.functions.delegate(DELEGATOR_ADDRESS,amt).buildTransaction({
+        'gas' : appropriate_gas_amount,
+        'nonce' : nonce
+    })
+    
+    signed_tx = web3.eth.account.sign_transaction(transaction, private_key)   
+        
+    #send transaction
+    tx_hash = web3.eth.sendRawTransaction(signed_tx.rawTransaction)
+    
+    #get transaction hash
+    print("https://goerli.etherscan.io/tx/" + web3.toHex(tx_hash))
+    nonce = nonce + 1 
+    global g_delegate_count
+    print("g_delegate_count:",g_delegate_count)
+    g_delegate_count = g_delegate_count + 1
+
+
+'''
+transfer 操作
+'''
+def transfer_operation(lp_addr,amt,token_addr,chain_id,max_slippage,private_key):
+    
+    myContract = web3.eth.contract(address=contract_address, abi=contract_abi)
+
+    # gas used by transaction
+    appropriate_gas_amount = 100000
+    # gas_price  
+    # gas_price = web3.toWei(2, 'gwei')
+
+    #get the nonce.  Prevents one from sending the transaction twice
+    global nonce
+    print("transfer_operation nonce:",nonce)
+    #build a transaction in a dictionary
+    transaction = myContract.functions.send(lp_addr,Web3.toChecksumAddress(token_addr),amt,chain_id,nonce,max_slippage).buildTransaction({
+        'gas' : appropriate_gas_amount,
+        'nonce' : nonce
+        })
+    
+
+    signed_tx = web3.eth.account.sign_transaction(transaction, private_key)   
+        
+    #send transaction
+    tx_hash = web3.eth.sendRawTransaction(signed_tx.rawTransaction)
+    
+    #get transaction hash
+    print("https://goerli.etherscan.io/tx/" + web3.toHex(tx_hash))
+    nonce = nonce + 1 
+    global g_transfer_count
+    g_transfer_count = g_transfer_count + 1
+
+'''
+markLiquidity 操作
+type=1 代表添加
+type=2 代表移除
+'''
+def mark_liquidity_operation(lp_addr,amt,token_addr,chain_id,type,private_key):
+    
+    myContract = web3.eth.contract(address=contract_address, abi=contract_abi)
+
+    # gas used by transaction
+    appropriate_gas_amount = 100000
+
+    #get the nonce.  Prevents one from sending the transaction twice
+    # nonce = web3.eth.getTransactionCount(lp_addr) + 1
+    global nonce
+    print("mark_liquidity_operation nonce:",nonce)
+
+    #build a transaction in a dictionary
+    transaction = myContract.functions.addLiquidity(token_addr,amt).buildTransaction({
+        'gas' : appropriate_gas_amount,
+        'nonce' : nonce
+        })
+    signed_tx = web3.eth.account.sign_transaction(transaction, private_key)   
+        
+    #send transaction
+    tx_hash = web3.eth.sendRawTransaction(signed_tx.rawTransaction)
+    
+    #get transaction hash
+    print("https://goerli.etherscan.io/tx/" + web3.toHex(tx_hash))
+
+    nonce = nonce + 1
+
+    PARAMS = {
+        "lp_addr":lp_addr,
+        "amt":str(amt),
+        "token_addr":token_addr,
+        "chain_id":chain_id,
+        "tx_hash":web3.toHex(tx_hash),
+        "type":type
+    }
+    # sending get request and saving the response as response json object
+    r = requests.post(url=MARK_LIQUIDITY_URL, json=PARAMS)
+    data = r.json()
+    print("mark_liquidity_operation result:"+str(data))
+    global g_add_liquidity_count
+    g_add_liquidity_count = g_add_liquidity_count + 1
+
+
+'''
+1、unlockFarmingReward
+2、
+# https://cbridge-v2-test.celer.network/v1/unlockFarmingReward   
+'''
+ 
+def unlock_farming_reward(address):
+    PARAMS = {
+        "addr":address
+    }
+    # sending get request and saving the response as response json object
+    r = requests.post(url=UNLOCK_CLAIM, json=PARAMS)
+    data = r.json()
+    print("unlock_farming_reward result:"+str(data))
+    
+
+
+def add_liquidity_celr(lp_addr,amt,private_key):
+            # print("current_timestamp_time:"+ datetime.datetime.fromtimestamp(current_timestamp/1000).strftime('%Y-%m-%d %H:%M:%S'))
+
+    print(datetime.datetime.fromtimestamp(get_current_timestamp()/1000).strftime('%Y-%m-%d %H:%M:%S') + "=======cbridge 2.0 add_liquidity address:%s amount:%s celr=======" %(lp_addr,balance_to_readable(amt,18)))
+    # markLiquidity 操作 type=1 代表添加
+    type = 1
+    # Goerli Testnet 上celr代币地址
+    token_addr = "0x5D3c0F4cA5EE99f8E8F59Ff9A5fAb04F6a7e007f"
+    # Goerli Testnet 链在cbridge中的配置id
+    chain_id = 5
+    mark_liquidity_operation(lp_addr,amt,token_addr,chain_id,type,private_key)
+
+def transfer_usdt_from_eth_to_bsc(lp_addr,amt,private_key):
+    print(datetime.datetime.fromtimestamp(get_current_timestamp()/1000).strftime('%Y-%m-%d %H:%M:%S') + "=======cbridge 2.0 transfer_usdt address:%s amount:%s usdt=======" %(lp_addr,balance_to_readable(amt,6)))
+    # Goerli Testnet 上usdt代币地址
+    token_addr = "0xf4b2cbc3ba04c478f0dc824f4806ac39982dce73"
+    # BSC 链在cbridge中的配置id
+    chain_id = 97
+    max_slippage = 900000
+
+    transfer_operation(lp_addr,amt,token_addr,chain_id,max_slippage,private_key)
+
+def yield_hunter_run(lp_addr,private_key,need_add_liquidity,need_transfer):  
+    
+    # 10个 USDT（精度6位）
+    if need_transfer == True:
+        amt = 1005000000
+        transfer_usdt_from_eth_to_bsc(lp_addr,amt,private_key)
+        time.sleep(3)
+
+    if need_add_liquidity == True:
+        # 1个 CELR (精度18位)
+        amt = 10000000000000000000000
+        add_liquidity_celr(lp_addr,amt,private_key)
+        time.sleep(3)
+    
+    
+
+
+'''
+统计当天分数
+'''
+def score():
+    address = "0xbbBF5cAB4176CE9f2F9b6c748467f693C3d78D52"
+    print("score start:",get_now())
+    get_score(address)
+    print("score end:",get_now())
+
+need_add_liquidity = True
+need_transfer = True
+need_delegate = True
+
+g_add_liquidity_count = 0
+g_transfer_count = 0
+g_delegate_count = 0
+def run(address_type,is_launch_run):
+    ten_seconds = 3
+    try: 
+     
+        # print(":::::::top3:::::::")
+        address = "0xbbBF5cAB4176CE9f2F9b6c748467f693C3d78D52"
+        private_key = ""
+            
+        transfer_threahold = random.randint(4999, 5005)
+        liquidity_threahold = random.randint(950, 1005)
+        delegate_threahold = random.randint(100, 105)
+        
+        # print(transfer_threahold,liquidity_threahold)
+        
+        while(True):
+            
+            print("is_launch_run",is_launch_run)
+            global need_add_liquidity
+            global need_transfer
+            global need_delegate
+  
+            need_add_liquidity = is_need_add_liquidity(address,liquidity_threahold)
+            need_transfer = is_need_transfer(address,transfer_threahold)
+            need_delegate = is_need_delegate(address,delegate_threahold)
+            
+            global g_delegate_count
+            global g_add_liquidity_count
+            global g_transfer_count 
+            print("g_add_liquidity_count",g_add_liquidity_count)
+            print("g_transfer_count",g_transfer_count)
+            print("g_delegate_count",g_delegate_count)
+
+            # 程序每隔10分钟轮询
+            if need_add_liquidity == False and need_transfer == False and need_delegate == False:
+                print("time sleep 600s....")
+                time.sleep(60 * 10)
+                is_launch_run = True
+                
+            # https://ethereum.stackexchange.com/questions/2808/what-happens-when-a-transaction-nonce-is-too-high
+            # 程序第一次启动，获取交易nonce 后续本地维护该nonce 
+            global nonce  
+            if is_launch_run:
+                nonce = web3.eth.getTransactionCount(address)
+            yield_hunter_run(address,private_key,need_add_liquidity,need_transfer)   
+            # unlock_farming_reward(address) 
+            # drip(address,private_key)
+            # delegate_10_celr(address,private_key)
+        
+            is_launch_run = False
+            
+    except JSONDecodeError as e:
+        print(e)
+        print("JSONDecodeError cbridge done,sleep "+ str(ten_seconds) +"s")
+        time.sleep(ten_seconds)
+        run(address_type,False)
+    except ValueError as v:
+        print(v)
+        # nonce exception handle
+        if str(v) == "{'code': -32000, 'message': 'nonce too low'}":
+            nonce = web3.eth.getTransactionCount(address)
+            print("nonce too low reset to",nonce) 
+
+        print("ValueError cbridge done,sleep "+ str(ten_seconds) +"s")
+        time.sleep(ten_seconds)
+        run(address_type,False)
+    except Exception as err:
+        print(err)
+        print("Other Exception cbridge done,sleep "+ str(ten_seconds) +"s")
+        time.sleep(ten_seconds)
+        run(address_type,False)
+
+def main():
+    if len(sys.argv) > 1:
+        address_type = int(sys.argv[1])
+        is_launch_run = True
+        run(address_type,is_launch_run)
+    else:
+        while True:
+            score()
+            time.sleep(30)
+
+
+if __name__ == '__main__':
+    main()
